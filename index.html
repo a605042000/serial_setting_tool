@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 綜合配置工具</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #f5f7fa;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        h2 {
+            color: #2c3e50;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }
+        .connection-panel {
+            background: #eef2f7;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .status {
+            font-weight: bold;
+            color: #e74c3c;
+        }
+        .status.connected {
+            color: #2ecc71;
+        }
+        .tabs {
+            display: flex;
+            margin-bottom: 0;
+            padding-left: 0;
+            list-style: none;
+            border-bottom: 2px solid #3498db;
+        }
+        .tab-btn {
+            padding: 12px 24px;
+            background: #e0e0e0;
+            border: none;
+            cursor: pointer;
+            border-radius: 6px 6px 0 0;
+            font-weight: bold;
+            color: #666;
+            margin-right: 4px;
+            transition: all 0.2s;
+        }
+        .tab-btn.active {
+            background: #3498db;
+            color: white;
+        }
+        .tab-content {
+            display: none;
+            border: 1px solid #ddd;
+            border-top: none;
+            padding: 20px;
+            background: #fff;
+            border-radius: 0 0 6px 6px;
+            margin-bottom: 20px;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+        }
+        th, td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f8f9fa;
+        }
+        input[type="text"], input[type="number"], select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        .btn-connect { background-color: #3498db; color: white; }
+        .btn-disconnect { background-color: #95a5a6; color: white; }
+        .btn-send { background-color: #2ecc71; color: white; }
+        .btn-read { background-color: #f39c12; color: white; }
+        button:hover { opacity: 0.9; }
+        button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
+        
+        .log-panel {
+            background: #2d3436;
+            color: #dfe6e9;
+            padding: 15px;
+            border-radius: 6px;
+            height: 180px;
+            overflow-y: auto;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>ESP32 綜合配置面板</h2>
+    
+    <div class="connection-panel">
+        <button id="btnConnect" class="btn-connect" onclick="connectSerial()">連接設備</button>
+        <button id="btnDisconnect" class="btn-disconnect" onclick="disconnectSerial()" disabled>斷開連接</button>
+        <div>狀態: <span id="serialStatus" class="status">未連接</span></div>
+        <div>波特率: <strong>115200</strong></div>
+    </div>
+
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab(event, 'chassis-tab')">底盤配置參數</button>
+        <button class="tab-btn" onclick="switchTab(event, 'radar-tab')">雷達配置參數</button>
+    </div>
+
+    <div id="chassis-tab" class="tab-content active">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 80px;">啟用</th>
+                    <th style="width: 220px;">參數名稱</th>
+                    <th>設定值</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><input type="checkbox" id="chk_chassis_wifi_ssid" checked></td>
+                    <td>wifi_ssid (WIFI名稱)</td>
+                    <td><input type="text" id="val_chassis_wifi_ssid" value="ZengWifi"></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" id="chk_chassis_wifi_pswd" checked></td>
+                    <td>wifi_pswd (WIFI密碼)</td>
+                    <td><input type="text" id="val_chassis_wifi_pswd" value=""></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" id="chk_chassis_udpserver_ip" checked></td>
+                    <td>udpserver_ip (伺服器IP)</td>
+                    <td><input type="text" id="val_chassis_udpserver_ip" value="192.168.8.166"></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" id="chk_chassis_udpserver_port"></td>
+                    <td>udpserver_port (伺服器埠)</td>
+                    <td><input type="number" id="val_chassis_udpserver_port" value="8888"></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" id="chk_chassis_ros2_domain_id"></td>
+                    <td>ros2_domain_id (ROS域ID)</td>
+                    <td><input type="number" id="val_chassis_ros2_domain_id" value="0"></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" id="chk_chassis_wheel_diameter"></td>
+                    <td>wheel_diameter (輪徑)</td>
+                    <td><input type="number" step="0.01" id="val_chassis_wheel_diameter" value="65"></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" id="chk_chassis_wheel_distance"></td>
+                    <td>wheel_distance (輪距)</td>
+                    <td><input type="number" step="0.01" id="val_chassis_wheel_distance" value="172.75"></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" id="chk_chassis_reducate_ration"></td>
+                    <td>reducate_ration (減速比)</td>
+                    <td><input type="number" step="0.01" id="val_chassis_reducate_ration" value="40.50"></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" id="chk_chassis_pulse_ration"></td>
+                    <td>pulse_ration (編碼器脈衝)</td>
+                    <td><input type="number" id="val_chassis_pulse_ration" value="44"></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" id="chk_chassis_pid_kp"></td>
+                    <td>pid_kp (馬達kp)</td>
+                    <td><input type="number" step="0.01" id="val_chassis_pid_kp" value="0.62"></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" id="chk_chassis_pid_ki"></td>
+                    <td>pid_ki (馬達ki)</td>
+                    <td><input type="number" step="0.01" id="val_chassis_pid_ki" value="0.13"></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" id="chk_chassis_pid_kd"></td>
+                    <td>pid_kd (馬達kd)</td>
+                    <td><input type="number" step="0.01" id="val_chassis_pid_kd" value="0.00"></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div id="radar-tab" class="tab-content">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 80px;">啟用</th>
+                    <th style="width: 220px;">參數名稱</th>
+                    <th>設定值</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><input type="checkbox" id="chk_radar_wifi_ssid" checked></td>
+                    <td>wifi_ssid (WiFi名稱)</td>
+                    <td><input type="text" id="val_radar_wifi_ssid" value="My_Home_WiFi"></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" id="chk_radar_wifi_pswd" checked></td>
+                    <td>wifi_pswd (WiFi密碼)</td>
+                    <td><input type="text" id="val_radar_wifi_pswd" value=""></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" id="chk_radar_server_ip" checked></td>
+                    <td>server_ip (伺服器IP)</td>
+                    <td><input type="text" id="val_radar_server_ip" value="192.168.1.100"></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" id="chk_radar_server_port"></td>
+                    <td>server_port (伺服器端口)</td>
+                    <td><input type="text" id="val_radar_server_port" value="tcp:8889"></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" id="chk_radar_motor_speed"></td>
+                    <td>motor_speed (電機速度)</td>
+                    <td><input type="number" id="val_radar_motor_speed" value="100"></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" id="chk_radar_laser_baud"></td>
+                    <td>laser_baud (雷達波特率)</td>
+                    <td><input type="number" id="val_radar_laser_baud" value="115200"></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" id="chk_radar_net_mode"></td>
+                    <td>net_mode (網路模式)</td>
+                    <td>
+                        <select id="val_radar_net_mode">
+                            <option value="tcp" selected>tcp</option>
+                            <option value="udp">udp</option>
+                        </select>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="btn-group">
+        <button id="btnSend" class="btn-send" onclick="sendActiveConfig()" disabled>一次送出當前頁面勾選設定</button>
+        <button id="btnRead" class="btn-read" onclick="readConfig()" disabled>讀取當前配置</button>
+    </div>
+
+    <h3>通訊日誌</h3>
+    <div id="logArea" class="log-panel">系統就緒，請點擊「連接設備」開始...</div>
+</div>
+
+<script>
+    let port = null;
+    let reader = null;
+    let keepReading = false;
+    let currentTab = 'chassis-tab';
+
+    const configs = {
+        'radar-tab': ['wifi_ssid', 'wifi_pswd', 'server_ip', 'server_port', 'motor_speed', 'laser_baud', 'net_mode'],
+        'chassis-tab': ['wifi_ssid', 'wifi_pswd', 'udpserver_ip', 'udpserver_port', 'ros2_domain_id', 'wheel_diameter', 'wheel_distance', 'reducate_ration', 'pulse_ration', 'pid_kp', 'pid_ki', 'pid_kd']
+    };
+
+    function switchTab(evt, tabId) {
+        currentTab = tabId;
+        const tabButtons = document.getElementsByClassName("tab-btn");
+        for (let i = 0; i < tabButtons.length; i++) {
+            tabButtons[i].classList.remove("active");
+        }
+        evt.currentTarget.classList.add("active");
+
+        const tabContents = document.getElementsByClassName("tab-content");
+        for (let i = 0; i < tabContents.length; i++) {
+            tabContents[i].classList.remove("active");
+        }
+        document.getElementById(tabId).classList.add("active");
+    }
+
+    function log(message, isOutput = false) {
+        const logArea = document.getElementById('logArea');
+        const prefix = isOutput ? '👉 [發送] ' : '👈 [接收] ';
+        logArea.innerText += `\n${prefix}${message.replace(/\r?\n/g, '\\n')}`;
+        logArea.scrollTop = logArea.scrollHeight;
+    }
+
+    function updateUI(connected) {
+        document.getElementById('btnConnect').disabled = connected;
+        document.getElementById('btnDisconnect').disabled = !connected;
+        document.getElementById('btnSend').disabled = !connected;
+        document.getElementById('btnRead').disabled = !connected;
+        
+        const statusEl = document.getElementById('serialStatus');
+        if (connected) {
+            statusEl.innerText = '已連接';
+            statusEl.classList.add('connected');
+        } else {
+            statusEl.innerText = '未連接';
+            statusEl.classList.remove('connected');
+        }
+    }
+
+    async function connectSerial() {
+        if (!('serial' in navigator)) {
+            alert('您的瀏覽器不支援 Web Serial API，請使用 Chrome 或 Edge 瀏覽器。');
+            return;
+        }
+
+        try {
+            port = await navigator.serial.requestPort();
+            await port.open({ baudRate: 115200 });
+            
+            keepReading = true;
+            updateUI(true);
+            document.getElementById('logArea').innerText = '成功連接至設備！';
+            
+            // 開始異步監聽接收資料
+            readLoop();
+        } catch (error) {
+            console.error(error);
+            alert('連線失敗: ' + error.message);
+            updateUI(false);
+        }
+    }
+
+    async function disconnectSerial() {
+        keepReading = false;
+
+        // 停止接收迴圈並釋放 Reader
+        if (reader) {
+            try {
+                await reader.cancel();
+            } catch (e) {
+                console.error("Cancel Reader Error:", e);
+            }
+        }
+
+        // 關閉 Port
+        if (port) {
+            try {
+                await port.close();
+            } catch (e) {
+                console.error("Close Port Error:", e);
+            }
+            port = null;
+        }
+
+        updateUI(false);
+        log('已與設備中斷連線。');
+    }
+
+    async function readLoop() {
+        const textDecoder = new TextDecoder();
+
+        while (port && port.readable && keepReading) {
+            try {
+                reader = port.readable.getReader();
+                while (keepReading) {
+                    const { value, done } = await reader.read();
+                    if (done) {
+                        break;
+                    }
+                    if (value) {
+                        log(textDecoder.decode(value));
+                    }
+                }
+            } catch (error) {
+                console.error("Read error:", error);
+            } finally {
+                if (reader) {
+                    reader.releaseLock();
+                    reader = null;
+                }
+            }
+        }
+
+        // 若非正常斷線（例如直接拔除 USB），自動修復 UI
+        if (keepReading) {
+            keepReading = false;
+            updateUI(false);
+            log('設備連線異常中斷。');
+        }
+    }
+
+    // 發送純文字指令（加入安全鎖與 CRLF 換行）
+    async function sendRawData(command) {
+        if (!port || !port.writable) {
+            alert('串口未連接！');
+            return;
+        }
+
+        const writer = port.writable.getWriter();
+        try {
+            const encoder = new TextEncoder();
+            // 建議使用 \r\n 確保相容所有 ESP32 解析庫
+            const data = encoder.encode(command);
+            await writer.write(data);
+            log(command.trim(), true);
+        } catch (error) {
+            console.error('Send error:', error);
+            alert('發送失敗: ' + error.message);
+        } finally {
+            writer.releaseLock(); // 發送完成立即釋放 Writer
+        }
+    }
+
+    async function sendActiveConfig() {
+        let hasSentData = false;
+        const prefix = currentTab === 'radar-tab' ? 'radar' : 'chassis';
+        const currentParams = configs[currentTab];
+        
+        for (const param of currentParams) {
+            const chk = document.getElementById(`chk_${prefix}_${param}`);
+            const input = document.getElementById(`val_${prefix}_${param}`);
+            
+            if (chk && chk.checked) {
+                const value = input.value.trim();
+                // 使用 \r\n 結尾
+                const cmd = `$${param}=${value}\r\n`;
+                await sendRawData(cmd);
+                hasSentData = true;
+                
+                // 增加至 150ms 延遲，確保 ESP32Flash/NVS 寫入緩衝不溢位
+                await new Promise(resolve => setTimeout(resolve, 150)); 
+            }
+        }
+        
+        if (!hasSentData) {
+            alert('當前頁面沒有勾選任何要送出的參數！');
+        }
+    }
+
+    async function readConfig() {
+        await sendRawData('$command=read_config\r\n');
+    }
+</script>
+
+</body>
+</html>
