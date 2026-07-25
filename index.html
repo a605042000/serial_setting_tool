@@ -35,7 +35,7 @@
             align-items: center;
             gap: 15px;
         }
-        .status {
+        .status {   
             font-weight: bold;
             color: #e74c3c;
         }
@@ -136,6 +136,38 @@
         }
         .status-ok { color: #2ecc71; font-weight: bold; }
         .status-missing { color: #e74c3c; }
+
+        /* 輪徑/輪距校準頁籤樣式 */
+        .calib-field { margin-bottom: 15px; }
+        .calib-field label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 14px; color: #444; }
+        .calib-result {
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            margin: 15px 0;
+            transition: all 0.2s;
+        }
+        .calib-result.neutral { background: #f8f9fa; border: 1px solid #ddd; }
+        .calib-result.warn { background: #fdf2e3; border: 1px solid #f5c98d; }
+        .calib-result.good { background: #e8f8f0; border: 1px solid #a3e9c5; }
+        .calib-result.perfect { background: #eaf4fc; border: 1px solid #a9d3f5; }
+        .calib-title { font-size: 13px; color: #666; font-weight: bold; margin-bottom: 4px; }
+        .calib-value { font-size: 32px; font-weight: bold; }
+        .calib-value.neutral { color: #bbb; }
+        .calib-value.warn { color: #e08e2b; }
+        .calib-value.good { color: #27ae60; }
+        .calib-value.perfect { color: #3498db; }
+        .calib-unit { font-size: 15px; color: #999; margin-left: 4px; }
+        .calib-hint { margin-top: 8px; font-size: 13px; color: #555; min-height: 1.2em; }
+        .calib-note {
+            background: #eef6fc;
+            border: 1px solid #cde6f7;
+            border-radius: 6px;
+            padding: 10px 14px;
+            font-size: 12px;
+            color: #555;
+            line-height: 1.6;
+        }
     </style>
 </head>
 <body>
@@ -153,6 +185,8 @@
     <div class="tabs">
         <button class="tab-btn active" onclick="switchTab(event, 'chassis-tab')">底盤配置參數</button>
         <button class="tab-btn" onclick="switchTab(event, 'radar-tab')">雷達配置參數</button>
+        <button class="tab-btn" onclick="switchTab(event, 'wheel-dia-tab')">直行校準（輪徑）</button>
+        <button class="tab-btn" onclick="switchTab(event, 'wheel-wb-tab')">旋轉校準（輪距）</button>
     </div>
 
     <div id="chassis-tab" class="tab-content active">
@@ -281,6 +315,60 @@
                 </tr>
             </tbody>
         </table>
+    </div>
+
+    <!-- ===================== 輪徑校準（直行）===================== -->
+    <div id="wheel-dia-tab" class="tab-content">
+        <div class="calib-field">
+            <label>目標直線距離 (mm)</label>
+            <input type="number" id="targetDist" step="any" placeholder="例如：1000">
+        </div>
+        <div class="calib-field">
+            <label>實際直線距離 (mm)</label>
+            <input type="number" id="actualDist" step="any" placeholder="例如：980">
+        </div>
+        <div class="calib-field">
+            <label>目前設定輪徑 (mm)</label>
+            <input type="number" id="currentDia" step="any" placeholder="例如：65">
+        </div>
+
+        <div id="resultBox-dia" class="calib-result neutral">
+            <div class="calib-title">建議修改為新輪徑</div>
+            <div><span id="resultValue-dia" class="calib-value neutral">--</span><span class="calib-unit">mm</span></div>
+            <div id="hintText-dia" class="calib-hint">請輸入上方所有數值以進行計算。</div>
+        </div>
+
+        <div class="calib-note">
+            💡 計算公式：新輪徑 = 目前輪徑 × (實際距離 / 目標距離)<br>
+            若走不到目標，代表以為的輪徑比實際大，要調小。
+        </div>
+    </div>
+
+    <!-- ===================== 輪距校準（旋轉）===================== -->
+    <div id="wheel-wb-tab" class="tab-content">
+        <div class="calib-field">
+            <label>目標旋轉角度 (度)</label>
+            <input type="number" id="targetAngle" step="any" placeholder="例如：360">
+        </div>
+        <div class="calib-field">
+            <label>實際旋轉角度 (度)</label>
+            <input type="number" id="actualAngle" step="any" placeholder="例如：350">
+        </div>
+        <div class="calib-field">
+            <label>目前設定輪距 (mm)</label>
+            <input type="number" id="currentWb" step="any" placeholder="例如：150">
+        </div>
+
+        <div id="resultBox-wb" class="calib-result neutral">
+            <div class="calib-title">建議修改為新輪距</div>
+            <div><span id="resultValue-wb" class="calib-value neutral">--</span><span class="calib-unit">mm</span></div>
+            <div id="hintText-wb" class="calib-hint">請輸入上方所有數值以進行計算。</div>
+        </div>
+
+        <div class="calib-note">
+            💡 計算公式：新輪距 = 目前輪距 × (目標角度 / 實際角度)<br>
+            ※ 注意：輪距的比例公式與輪徑相反！若旋轉不足，代表實體底盤較寬，需將輪距參數調大以增加兩輪速差的行駛弧長。
+        </div>
     </div>
 
     <div class="btn-group">
@@ -596,7 +684,92 @@
 
         await sendRawData('$command=read_config\n');
     }
+
+    // ===================== 輪徑校準（融合自 車體校正.html） =====================
+    const targetDistInput = document.getElementById('targetDist');
+    const actualDistInput = document.getElementById('actualDist');
+    const currentDiaInput = document.getElementById('currentDia');
+
+    function calculateDiameter() {
+        const target = parseFloat(targetDistInput.value);
+        const actual = parseFloat(actualDistInput.value);
+        const current = parseFloat(currentDiaInput.value);
+        const resultValue = document.getElementById('resultValue-dia');
+        const hintText = document.getElementById('hintText-dia');
+
+        if (target > 0 && actual > 0 && current > 0) {
+            const newDiameter = current * (actual / target); // 輪徑公式：實際/目標
+            resultValue.textContent = newDiameter.toFixed(4);
+
+            if (actual < target) {
+                hintText.innerHTML = '<strong>跑不到目標</strong>。輪徑參數偏大，請調小。';
+                setCalibState('dia', 'warn');
+            } else if (actual > target) {
+                hintText.innerHTML = '<strong>跑超過目標</strong>。輪徑參數偏小，請調大。';
+                setCalibState('dia', 'good');
+            } else {
+                hintText.innerHTML = '<strong>距離非常完美！</strong> 系統無需調整。';
+                setCalibState('dia', 'perfect');
+            }
+        } else {
+            resetCalibBox('dia');
+        }
+    }
+
+    // ===================== 輪距校準（融合自 車體校正.html） =====================
+    const targetAngleInput = document.getElementById('targetAngle');
+    const actualAngleInput = document.getElementById('actualAngle');
+    const currentWbInput = document.getElementById('currentWb');
+
+    function calculateWheelbase() {
+        const target = parseFloat(targetAngleInput.value);
+        const actual = parseFloat(actualAngleInput.value);
+        const current = parseFloat(currentWbInput.value);
+        const resultValue = document.getElementById('resultValue-wb');
+        const hintText = document.getElementById('hintText-wb');
+
+        if (target > 0 && actual > 0 && current > 0) {
+            // 輪距公式與輪徑相反：目標/實際
+            const newWb = current * (target / actual);
+            resultValue.textContent = newWb.toFixed(4);
+
+            if (actual < target) {
+                hintText.innerHTML = '<strong>旋轉角度不足</strong>。實體底盤較寬，請將輪距參數調大。';
+                setCalibState('wb', 'warn');
+            } else if (actual > target) {
+                hintText.innerHTML = '<strong>旋轉角度過頭</strong>。實體底盤較窄，請將輪距參數調小。';
+                setCalibState('wb', 'good');
+            } else {
+                hintText.innerHTML = '<strong>角度非常完美！</strong> 系統無需調整。';
+                setCalibState('wb', 'perfect');
+            }
+        } else {
+            resetCalibBox('wb');
+        }
+    }
+
+    // 依計算狀態切換結果區塊的顏色樣式（neutral / warn / good / perfect）
+    function setCalibState(type, state) {
+        document.getElementById(`resultBox-${type}`).className = `calib-result ${state}`;
+        document.getElementById(`resultValue-${type}`).className = `calib-value ${state}`;
+    }
+
+    function resetCalibBox(type) {
+        document.getElementById(`resultValue-${type}`).textContent = '--';
+        document.getElementById(`hintText-${type}`).textContent = '請輸入上方所有數值以進行即時計算。';
+        setCalibState(type, 'neutral');
+    }
+
+    // 綁定即時計算事件
+    targetDistInput.addEventListener('input', calculateDiameter);
+    actualDistInput.addEventListener('input', calculateDiameter);
+    currentDiaInput.addEventListener('input', calculateDiameter);
+
+    targetAngleInput.addEventListener('input', calculateWheelbase);
+    actualAngleInput.addEventListener('input', calculateWheelbase);
+    currentWbInput.addEventListener('input', calculateWheelbase);
 </script>
+
 
 </body>
 </html>
