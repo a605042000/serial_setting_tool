@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP32 綜合配置工具</title>
+    <title>嘉工機器人配置工具</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -42,6 +42,8 @@
         .status.connected {
             color: #2ecc71;
         }
+        
+        /* 頁籤樣式 */
         .tabs {
             display: flex;
             margin-bottom: 0;
@@ -76,6 +78,7 @@
         .tab-content.active {
             display: block;
         }
+
         table {
             width: 100%;
             border-collapse: collapse;
@@ -114,25 +117,31 @@
         .btn-disconnect { background-color: #95a5a6; color: white; }
         .btn-send { background-color: #2ecc71; color: white; }
         .btn-read { background-color: #f39c12; color: white; }
+        .btn-restart { background-color: #e74c3c; color: white; }
         button:hover { opacity: 0.9; }
         button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
         
-        .log-panel {
-            background: #2d3436;
-            color: #dfe6e9;
-            padding: 15px;
+        .config-panel {
+            background: #f8f9fa;
+            border: 1px solid #ddd;
             border-radius: 6px;
-            height: 180px;
-            overflow-y: auto;
-            font-family: monospace;
-            white-space: pre-wrap;
+            padding: 15px;
+            min-height: 60px;
         }
+        .config-panel .empty-hint {
+            color: #999;
+        }
+        .config-panel table {
+            margin-bottom: 0;
+        }
+        .status-ok { color: #2ecc71; font-weight: bold; }
+        .status-missing { color: #e74c3c; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>ESP32 綜合配置面板</h2>
+    <h2>嘉工機器人-串口配置工具</h2>
     
     <div class="connection-panel">
         <button id="btnConnect" class="btn-connect" onclick="connectSerial()">連接設備</button>
@@ -159,17 +168,17 @@
                 <tr>
                     <td><input type="checkbox" id="chk_chassis_wifi_ssid" checked></td>
                     <td>wifi_ssid (WIFI名稱)</td>
-                    <td><input type="text" id="val_chassis_wifi_ssid" value="ZengWifi"></td>
+                    <td><input type="text" id="val_chassis_wifi_ssid" value="YouWei"></td>
                 </tr>
                 <tr>
                     <td><input type="checkbox" id="chk_chassis_wifi_pswd" checked></td>
                     <td>wifi_pswd (WIFI密碼)</td>
-                    <td><input type="text" id="val_chassis_wifi_pswd" value=""></td>
+                    <td><input type="text" id="val_chassis_wifi_pswd" value="12345678"></td>
                 </tr>
                 <tr>
                     <td><input type="checkbox" id="chk_chassis_udpserver_ip" checked></td>
                     <td>udpserver_ip (伺服器IP)</td>
-                    <td><input type="text" id="val_chassis_udpserver_ip" value="192.168.8.166"></td>
+                    <td><input type="text" id="val_chassis_udpserver_ip" value="192.168.0.123"></td>
                 </tr>
                 <tr>
                     <td><input type="checkbox" id="chk_chassis_udpserver_port"></td>
@@ -233,17 +242,17 @@
                 <tr>
                     <td><input type="checkbox" id="chk_radar_wifi_ssid" checked></td>
                     <td>wifi_ssid (WiFi名稱)</td>
-                    <td><input type="text" id="val_radar_wifi_ssid" value="My_Home_WiFi"></td>
+                    <td><input type="text" id="val_radar_wifi_ssid" value="YouWei"></td>
                 </tr>
                 <tr>
                     <td><input type="checkbox" id="chk_radar_wifi_pswd" checked></td>
                     <td>wifi_pswd (WiFi密碼)</td>
-                    <td><input type="text" id="val_radar_wifi_pswd" value=""></td>
+                    <td><input type="text" id="val_radar_wifi_pswd" value="12345678"></td>
                 </tr>
                 <tr>
                     <td><input type="checkbox" id="chk_radar_server_ip" checked></td>
                     <td>server_ip (伺服器IP)</td>
-                    <td><input type="text" id="val_radar_server_ip" value="192.168.1.100"></td>
+                    <td><input type="text" id="val_radar_server_ip" value="192.168.0.123"></td>
                 </tr>
                 <tr>
                     <td><input type="checkbox" id="chk_radar_server_port"></td>
@@ -277,31 +286,59 @@
     <div class="btn-group">
         <button id="btnSend" class="btn-send" onclick="sendActiveConfig()" disabled>一次送出當前頁面勾選設定</button>
         <button id="btnRead" class="btn-read" onclick="readConfig()" disabled>讀取當前配置</button>
+        <button id="btnRestart" class="btn-restart" onclick="restartDevice()" disabled>重新啟動裝置</button>
     </div>
 
-    <h3>通訊日誌</h3>
-    <div id="logArea" class="log-panel">系統就緒，請點擊「連接設備」開始...</div>
+    <h3>目前配置 <span id="currentConfigMeta" style="font-weight: normal; font-size: 14px; color: #888;"></span></h3>
+    <div id="currentConfigPanel" class="config-panel"><span class="empty-hint">尚未讀取，請點擊「讀取當前配置」...</span></div>
 </div>
 
 <script>
-    let port = null;
-    let reader = null;
-    let keepReading = false;
-    let currentTab = 'chassis-tab';
+    let port;
+    let writer;
+    let reader;
+    let keepReading = true;
+    let currentTab = 'chassis-tab'; // 修改核心：預設為底盤分頁
 
+    // 兩組分頁的參數名單
     const configs = {
         'radar-tab': ['wifi_ssid', 'wifi_pswd', 'server_ip', 'server_port', 'motor_speed', 'laser_baud', 'net_mode'],
         'chassis-tab': ['wifi_ssid', 'wifi_pswd', 'udpserver_ip', 'udpserver_port', 'ros2_domain_id', 'wheel_diameter', 'wheel_distance', 'reducate_ration', 'pulse_ration', 'pid_kp', 'pid_ki', 'pid_kd']
     };
 
+    // 各分頁參數對應的中文說明（用於整理後的乾淨輸出）
+    const paramLabels = {
+        'radar-tab': {
+            wifi_ssid: 'WiFi名稱', wifi_pswd: 'WiFi密碼', server_ip: '伺服器IP', server_port: '伺服器端口',
+            motor_speed: '電機速度', laser_baud: '雷達波特率', net_mode: '網路模式'
+        },
+        'chassis-tab': {
+            wifi_ssid: 'WIFI名稱', wifi_pswd: 'WIFI密碼', udpserver_ip: '伺服器IP', udpserver_port: '伺服器埠',
+            ros2_domain_id: 'ROS域ID', wheel_diameter: '輪徑', wheel_distance: '輪距', reducate_ration: '減速比',
+            pulse_ration: '編碼器脈衝', pid_kp: '馬達kp', pid_ki: '馬達ki', pid_kd: '馬達kd'
+        }
+    };
+
+    // ===== 讀取配置解析（爬蟲式）狀態 =====
+    let isParsingConfig = false;   // 是否處於「讀取配置」解析模式
+    let parseLineBuffer = '';      // 尚未湊成完整一行的殘餘字元
+    let parsedConfigResult = {};   // 已解析到的 key=value
+    let parseTabAtStart = '';      // 開始讀取時所在的分頁
+    let parseIdleTimer = null;     // 收到最後一行後的靜置計時器
+    let parseHardTimer = null;     // 硬性逾時（避免裝置完全沒回應）
+
+    // 頁籤切換邏輯
     function switchTab(evt, tabId) {
         currentTab = tabId;
+        
+        // 切換按鈕高亮狀態
         const tabButtons = document.getElementsByClassName("tab-btn");
         for (let i = 0; i < tabButtons.length; i++) {
             tabButtons[i].classList.remove("active");
         }
         evt.currentTarget.classList.add("active");
 
+        // 切換內容顯示狀態
         const tabContents = document.getElementsByClassName("tab-content");
         for (let i = 0; i < tabContents.length; i++) {
             tabContents[i].classList.remove("active");
@@ -309,18 +346,13 @@
         document.getElementById(tabId).classList.add("active");
     }
 
-    function log(message, isOutput = false) {
-        const logArea = document.getElementById('logArea');
-        const prefix = isOutput ? '👉 [發送] ' : '👈 [接收] ';
-        logArea.innerText += `\n${prefix}${message.replace(/\r?\n/g, '\\n')}`;
-        logArea.scrollTop = logArea.scrollHeight;
-    }
-
+    // 更新 UI 按鈕可用狀態
     function updateUI(connected) {
         document.getElementById('btnConnect').disabled = connected;
         document.getElementById('btnDisconnect').disabled = !connected;
         document.getElementById('btnSend').disabled = !connected;
         document.getElementById('btnRead').disabled = !connected;
+        document.getElementById('btnRestart').disabled = !connected;
         
         const statusEl = document.getElementById('serialStatus');
         if (connected) {
@@ -332,110 +364,177 @@
         }
     }
 
+    // 連接串口
     async function connectSerial() {
         if (!('serial' in navigator)) {
             alert('您的瀏覽器不支援 Web Serial API，請使用 Chrome 或 Edge 瀏覽器。');
             return;
         }
-
         try {
             port = await navigator.serial.requestPort();
             await port.open({ baudRate: 115200 });
             
+            writer = port.writable.getWriter();
             keepReading = true;
-            updateUI(true);
-            document.getElementById('logArea').innerText = '成功連接至設備！';
+            readLoop(); 
             
-            // 開始異步監聽接收資料
-            readLoop();
+            updateUI(true);
         } catch (error) {
             console.error(error);
             alert('連線失敗: ' + error.message);
-            updateUI(false);
         }
     }
 
+    // 斷開串口
     async function disconnectSerial() {
         keepReading = false;
-
-        // 停止接收迴圈並釋放 Reader
         if (reader) {
-            try {
-                await reader.cancel();
-            } catch (e) {
-                console.error("Cancel Reader Error:", e);
-            }
+            await reader.cancel();
         }
-
-        // 關閉 Port
+        if (writer) {
+            writer.releaseLock();
+        }
         if (port) {
-            try {
-                await port.close();
-            } catch (e) {
-                console.error("Close Port Error:", e);
-            }
-            port = null;
+            await port.close();
         }
-
         updateUI(false);
-        log('已與設備中斷連線。');
     }
 
+    // 讀取接收數據的迴圈
     async function readLoop() {
         const textDecoder = new TextDecoder();
-
-        while (port && port.readable && keepReading) {
+        while (port.readable && keepReading) {
+            reader = port.readable.getReader();
             try {
-                reader = port.readable.getReader();
-                while (keepReading) {
+                while (true) {
                     const { value, done } = await reader.read();
-                    if (done) {
-                        break;
-                    }
+                    if (done) break;
                     if (value) {
-                        log(textDecoder.decode(value));
+                        handleIncomingData(textDecoder.decode(value));
                     }
                 }
             } catch (error) {
-                console.error("Read error:", error);
+                console.error(error);
             } finally {
-                if (reader) {
-                    reader.releaseLock();
-                    reader = null;
-                }
+                reader.releaseLock();
             }
-        }
-
-        // 若非正常斷線（例如直接拔除 USB），自動修復 UI
-        if (keepReading) {
-            keepReading = false;
-            updateUI(false);
-            log('設備連線異常中斷。');
         }
     }
 
-    // 發送純文字指令（加入安全鎖與 CRLF 換行）
-    async function sendRawData(command) {
-        if (!port || !port.writable) {
-            alert('串口未連接！');
+    // 分流處理收到的資料：非「讀取配置」模式下的資料不在畫面上顯示（只寫入 console 供除錯）；
+    // 「讀取配置」模式下則靜默緩衝、解析，不逐字元顯示雜訊。
+    function handleIncomingData(text) {
+        if (!isParsingConfig) {
+            console.log('[序列埠收到]', text);
             return;
         }
 
-        const writer = port.writable.getWriter();
-        try {
-            const encoder = new TextEncoder();
-            // 建議使用 \r\n 確保相容所有 ESP32 解析庫
-            const data = encoder.encode(command);
-            await writer.write(data);
-            log(command.trim(), true);
-        } catch (error) {
-            console.error('Send error:', error);
-            alert('發送失敗: ' + error.message);
-        } finally {
-            writer.releaseLock(); // 發送完成立即釋放 Writer
+        parseLineBuffer += text;
+        const lines = parseLineBuffer.split('\n');
+        // 最後一段可能不是完整的一行，留到下次繼續累積
+        parseLineBuffer = lines.pop();
+
+        for (const rawLine of lines) {
+            feedConfigLine(rawLine);
         }
     }
 
+    // 解析單行資料，只挑出符合 $key=value 格式的內容（像爬蟲一樣過濾雜訊）
+    function feedConfigLine(rawLine) {
+        const line = rawLine.replace('\r', '').trim();
+        if (!line) return;
+
+        const match = line.match(/^\$([a-zA-Z0-9_]+)=(.*)$/);
+        if (!match) return; // 不符合格式的雜訊行，直接忽略
+
+        const [, key, value] = match;
+        parsedConfigResult[key] = value.trim();
+
+        // 每收到一筆有效資料就重新倒數，等真正安靜下來再統一整理輸出
+        clearTimeout(parseIdleTimer);
+        parseIdleTimer = setTimeout(finalizeConfigRead, 400);
+    }
+
+    // 整理解析結果，以表格形式重新繪製「目前配置」視窗，並回填到對應的輸入框
+    function finalizeConfigRead() {
+        if (!isParsingConfig) return;
+        isParsingConfig = false;
+        clearTimeout(parseIdleTimer);
+        clearTimeout(parseHardTimer);
+
+        const tab = parseTabAtStart;
+        const prefix = tab === 'radar-tab' ? 'radar' : 'chassis';
+        const params = configs[tab];
+        const labels = paramLabels[tab];
+        const tabName = tab === 'radar-tab' ? '雷達配置參數' : '底盤配置參數';
+
+        const table = document.createElement('table');
+        const thead = document.createElement('thead');
+        const headRow = document.createElement('tr');
+        ['參數名稱', '讀取到的值', '狀態'].forEach(text => {
+            const th = document.createElement('th');
+            th.textContent = text;
+            headRow.appendChild(th);
+        });
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        let receivedCount = 0;
+
+        for (const param of params) {
+            const label = labels[param] || param;
+            const tr = document.createElement('tr');
+
+            const tdName = document.createElement('td');
+            tdName.textContent = `${param} (${label})`;
+            tr.appendChild(tdName);
+
+            const tdValue = document.createElement('td');
+            const tdStatus = document.createElement('td');
+
+            if (Object.prototype.hasOwnProperty.call(parsedConfigResult, param)) {
+                const value = parsedConfigResult[param];
+                tdValue.textContent = value;
+                tdStatus.textContent = '已讀取';
+                tdStatus.className = 'status-ok';
+
+                // 回填到畫面上對應的輸入框，方便直接比對/編輯
+                const input = document.getElementById(`val_${prefix}_${param}`);
+                if (input) input.value = value;
+                receivedCount++;
+            } else {
+                tdValue.textContent = '—';
+                tdStatus.textContent = '未回傳';
+                tdStatus.className = 'status-missing';
+            }
+            tr.appendChild(tdValue);
+            tr.appendChild(tdStatus);
+            tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+
+        const panel = document.getElementById('currentConfigPanel');
+        panel.innerHTML = '';
+        panel.appendChild(table);
+
+        const now = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+        document.getElementById('currentConfigMeta').textContent =
+            `（${tabName}・共收到 ${receivedCount}/${params.length} 筆・更新時間 ${now}）`;
+
+        parsedConfigResult = {};
+        parseLineBuffer = '';
+    }
+
+    // 向串口發送純文字指令
+    async function sendRawData(command) {
+        if (!writer) return;
+        const encoder = new TextEncoder();
+        const data = encoder.encode(command);
+        await writer.write(data);
+    }
+
+    // 功能 1：批次送出「當前分頁」有勾選的配置，送完後延遲 2 秒發送重啟指令，再讀取顯示最新配置
     async function sendActiveConfig() {
         let hasSentData = false;
         const prefix = currentTab === 'radar-tab' ? 'radar' : 'chassis';
@@ -447,23 +546,55 @@
             
             if (chk && chk.checked) {
                 const value = input.value.trim();
-                // 使用 \r\n 結尾
-                const cmd = `$${param}=${value}\r\n`;
+                // 格式化指令: $參數名=內容\n
+                const cmd = `$${param}=${value}\n`;
                 await sendRawData(cmd);
                 hasSentData = true;
                 
-                // 增加至 150ms 延遲，確保 ESP32Flash/NVS 寫入緩衝不溢位
-                await new Promise(resolve => setTimeout(resolve, 150)); 
+                // 微小延遲避免 ESP32 接收緩衝溢位
+                await new Promise(resolve => setTimeout(resolve, 100)); 
             }
         }
         
         if (!hasSentData) {
             alert('當前頁面沒有勾選任何要送出的參數！');
+            return;
         }
+
+        // 設定訊息都發完後，延遲 2 秒再發送重啟指令，讓裝置有時間寫入/生效
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        await restartDevice();
+
+        // 重啟指令發送後，讀取並顯示目前配置
+        await readConfig();
     }
 
+    // 功能 3：發送重新啟動指令（$command=restart\n）
+    async function restartDevice() {
+        await sendRawData('$command=restart\n');
+    }
+
+    // 功能 2：讀取當前配置（爬蟲式解析：靜默收集後重新繪製「目前配置」視窗）
     async function readConfig() {
-        await sendRawData('$command=read_config\r\n');
+        // 若前一次讀取還在進行中，先強制收尾避免狀態卡住
+        if (isParsingConfig) {
+            finalizeConfigRead();
+        }
+
+        isParsingConfig = true;
+        parsedConfigResult = {};
+        parseLineBuffer = '';
+        parseTabAtStart = currentTab;
+
+        // 按下讀取當下，先顯示讀取中狀態，之後會重新繪製成最新的目前配置表格
+        document.getElementById('currentConfigPanel').innerHTML = '<span class="empty-hint">讀取中...</span>';
+        document.getElementById('currentConfigMeta').textContent = '';
+
+        // 保底逾時：若裝置完全沒有回應符合格式的資料，3 秒後仍會收尾顯示（未回傳）
+        clearTimeout(parseHardTimer);
+        parseHardTimer = setTimeout(finalizeConfigRead, 3000);
+
+        await sendRawData('$command=read_config\n');
     }
 </script>
 
