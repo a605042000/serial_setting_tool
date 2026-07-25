@@ -342,6 +342,13 @@
             💡 計算公式：新輪徑 = 目前輪徑 × (實際距離 / 目標距離)<br>
             若走不到目標，代表以為的輪徑比實際大，要調小。
         </div>
+
+        <div class="btn-group">
+            <button id="btnSetDia" class="btn-send" onclick="setWheelParam('wheel_diameter', 'resultValue-dia')" disabled>設定輪徑（寫入建議值）</button>
+            <button id="btnReadDia" class="btn-read" onclick="readWheelParam('wheel_diameter', 'currentDiaConfigPanel', 'currentDia')" disabled>讀取輪徑</button>
+        </div>
+        <h3 style="margin-bottom: 10px;">目前輪徑配置</h3>
+        <div id="currentDiaConfigPanel" class="config-panel"><span class="empty-hint">尚未讀取，請點擊「讀取輪徑」...</span></div>
     </div>
 
     <!-- ===================== 輪距校準（旋轉）===================== -->
@@ -369,16 +376,25 @@
             💡 計算公式：新輪距 = 目前輪距 × (目標角度 / 實際角度)<br>
             ※ 注意：輪距的比例公式與輪徑相反！若旋轉不足，代表實體底盤較寬，需將輪距參數調大以增加兩輪速差的行駛弧長。
         </div>
+
+        <div class="btn-group">
+            <button id="btnSetWb" class="btn-send" onclick="setWheelParam('wheel_distance', 'resultValue-wb')" disabled>設定輪距（寫入建議值）</button>
+            <button id="btnReadWb" class="btn-read" onclick="readWheelParam('wheel_distance', 'currentWbConfigPanel', 'currentWb')" disabled>讀取輪距</button>
+        </div>
+        <h3 style="margin-bottom: 10px;">目前輪距配置</h3>
+        <div id="currentWbConfigPanel" class="config-panel"><span class="empty-hint">尚未讀取，請點擊「讀取輪距」...</span></div>
     </div>
 
-    <div class="btn-group">
-        <button id="btnSend" class="btn-send" onclick="sendActiveConfig()" disabled>一次送出當前頁面勾選設定</button>
-        <button id="btnRead" class="btn-read" onclick="readConfig()" disabled>讀取當前配置</button>
-        <button id="btnRestart" class="btn-restart" onclick="restartDevice()" disabled>重新啟動裝置</button>
-    </div>
+    <div id="sharedConfigControls">
+        <div class="btn-group">
+            <button id="btnSend" class="btn-send" onclick="sendActiveConfig()" disabled>一次送出當前頁面勾選設定</button>
+            <button id="btnRead" class="btn-read" onclick="readConfig()" disabled>讀取當前配置</button>
+            <button id="btnRestart" class="btn-restart" onclick="restartDevice()" disabled>重新啟動裝置</button>
+        </div>
 
-    <h3>目前配置 <span id="currentConfigMeta" style="font-weight: normal; font-size: 14px; color: #888;"></span></h3>
-    <div id="currentConfigPanel" class="config-panel"><span class="empty-hint">尚未讀取，請點擊「讀取當前配置」...</span></div>
+        <h3>目前配置 <span id="currentConfigMeta" style="font-weight: normal; font-size: 14px; color: #888;"></span></h3>
+        <div id="currentConfigPanel" class="config-panel"><span class="empty-hint">尚未讀取，請點擊「讀取當前配置」...</span></div>
+    </div>
 </div>
 
 <script>
@@ -411,9 +427,13 @@
     let isParsingConfig = false;   // 是否處於「讀取配置」解析模式
     let parseLineBuffer = '';      // 尚未湊成完整一行的殘餘字元
     let parsedConfigResult = {};   // 已解析到的 key=value
-    let parseTabAtStart = '';      // 開始讀取時所在的分頁
+    let parseTabAtStart = '';      // 開始讀取時所在的分頁（全頁模式使用）
     let parseIdleTimer = null;     // 收到最後一行後的靜置計時器
     let parseHardTimer = null;     // 硬性逾時（避免裝置完全沒回應）
+    let parseMode = 'full';        // 'full'：整頁參數表格；'single'：單一參數（輪徑/輪距頁籤用）
+    let parseSingleParam = '';     // 單一參數模式下要讀取的 key
+    let parseSingleTargetId = '';  // 單一參數模式下顯示結果的元素 id
+    let parseSingleInputId = '';   // 單一參數模式下需要回填的輸入框 id
 
     // 頁籤切換邏輯
     function switchTab(evt, tabId) {
@@ -432,6 +452,10 @@
             tabContents[i].classList.remove("active");
         }
         document.getElementById(tabId).classList.add("active");
+
+        // 「送出/讀取/重啟」共用控制列與「目前配置」面板，只在底盤/雷達這兩個頁籤顯示
+        const sharedControls = document.getElementById('sharedConfigControls');
+        sharedControls.style.display = (tabId === 'chassis-tab' || tabId === 'radar-tab') ? '' : 'none';
     }
 
     // 更新 UI 按鈕可用狀態
@@ -441,6 +465,10 @@
         document.getElementById('btnSend').disabled = !connected;
         document.getElementById('btnRead').disabled = !connected;
         document.getElementById('btnRestart').disabled = !connected;
+        document.getElementById('btnSetDia').disabled = !connected;
+        document.getElementById('btnReadDia').disabled = !connected;
+        document.getElementById('btnSetWb').disabled = !connected;
+        document.getElementById('btnReadWb').disabled = !connected;
         
         const statusEl = document.getElementById('serialStatus');
         if (connected) {
@@ -543,12 +571,17 @@
         parseIdleTimer = setTimeout(finalizeConfigRead, 400);
     }
 
-    // 整理解析結果，以表格形式重新繪製「目前配置」視窗，並回填到對應的輸入框
+    // 整理解析結果：依 parseMode 分流到「全頁參數表格」或「單一參數」的完成處理
     function finalizeConfigRead() {
         if (!isParsingConfig) return;
         isParsingConfig = false;
         clearTimeout(parseIdleTimer);
         clearTimeout(parseHardTimer);
+
+        if (parseMode === 'single') {
+            finalizeSingleParamRead();
+            return;
+        }
 
         const tab = parseTabAtStart;
         const prefix = tab === 'radar-tab' ? 'radar' : 'chassis';
@@ -614,6 +647,37 @@
         parseLineBuffer = '';
     }
 
+    // 單一參數模式的完成處理：只顯示/回填指定的那一個參數（輪徑或輪距頁籤用）
+    function finalizeSingleParamRead() {
+        const value = parsedConfigResult[parseSingleParam];
+        const panel = document.getElementById(parseSingleTargetId);
+        const now = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+
+        if (value !== undefined) {
+            panel.innerHTML = '';
+            const p = document.createElement('p');
+            p.style.margin = '0';
+            const strong = document.createElement('strong');
+            strong.textContent = `${parseSingleParam}：`;
+            p.appendChild(strong);
+            p.appendChild(document.createTextNode(`${value}（更新時間 ${now}）`));
+            panel.appendChild(p);
+
+            // 回填到校準頁籤的「目前設定」輸入框，方便直接續算
+            const input = document.getElementById(parseSingleInputId);
+            if (input) input.value = value;
+
+            // 同步回填到底盤配置頁籤對應的欄位，保持一致
+            const chassisInput = document.getElementById(`val_chassis_${parseSingleParam}`);
+            if (chassisInput) chassisInput.value = value;
+        } else {
+            panel.innerHTML = '<span class="empty-hint">裝置未回傳此參數（未回傳）</span>';
+        }
+
+        parsedConfigResult = {};
+        parseLineBuffer = '';
+    }
+
     // 向串口發送純文字指令
     async function sendRawData(command) {
         if (!writer) return;
@@ -662,6 +726,42 @@
         await sendRawData('$command=restart\n');
     }
 
+    // 功能 4：單一參數讀取（輪徑/輪距頁籤用）：仍然發送 read_config，但只解析/顯示指定的單一參數
+    async function readWheelParam(paramName, panelId, inputId) {
+        if (isParsingConfig) {
+            finalizeConfigRead();
+        }
+
+        isParsingConfig = true;
+        parsedConfigResult = {};
+        parseLineBuffer = '';
+        parseMode = 'single';
+        parseSingleParam = paramName;
+        parseSingleTargetId = panelId;
+        parseSingleInputId = inputId;
+
+        document.getElementById(panelId).innerHTML = '<span class="empty-hint">讀取中...</span>';
+
+        clearTimeout(parseHardTimer);
+        parseHardTimer = setTimeout(finalizeConfigRead, 3000);
+
+        await sendRawData('$command=read_config\n');
+    }
+
+    // 功能 5：單一參數設定（輪徑/輪距頁籤用）：將計算出的建議值直接寫回裝置
+    async function setWheelParam(paramName, resultElementId) {
+        const value = document.getElementById(resultElementId).textContent.trim();
+        if (!value || value === '--') {
+            alert('請先輸入上方數值計算出建議值，才能設定。');
+            return;
+        }
+        await sendRawData(`$${paramName}=${value}\n`);
+
+        // 同步更新底盤設定頁籤的對應欄位，保持一致
+        const chassisInput = document.getElementById(`val_chassis_${paramName}`);
+        if (chassisInput) chassisInput.value = value;
+    }
+
     // 功能 2：讀取當前配置（爬蟲式解析：靜默收集後重新繪製「目前配置」視窗）
     async function readConfig() {
         // 若前一次讀取還在進行中，先強制收尾避免狀態卡住
@@ -672,6 +772,7 @@
         isParsingConfig = true;
         parsedConfigResult = {};
         parseLineBuffer = '';
+        parseMode = 'full';
         parseTabAtStart = currentTab;
 
         // 按下讀取當下，先顯示讀取中狀態，之後會重新繪製成最新的目前配置表格
